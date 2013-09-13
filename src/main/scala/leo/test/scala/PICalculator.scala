@@ -4,6 +4,7 @@ import akka.actor._
 import akka.actor.SupervisorStrategy._
 import scala.concurrent.duration._
 import akka.util.Timeout
+import scala.math._
 import akka.routing._
 import akka.event.LoggingReceive
 import akka.pattern.{ask, pipe}
@@ -15,13 +16,13 @@ object Listener {
 /**
 * To distribute tasks, and recieve the final result
 */
-class Listener(value: Double, step: Double) extends Actor with ActorLogging {
+class Listener(value: Double, step: Double, mathCtx: java.math.MathContext) extends Actor with ActorLogging {
 	import Listener._
 	import Worker._
 
 	val beginTime = System.currentTimeMillis
-	val router = context.actorOf(Props[Worker].withRouter(RoundRobinRouter(100)), "router")
-	var pi = 0.0
+	val router = context.actorOf(Props(classOf[Worker], mathCtx).withRouter(RoundRobinRouter(100)), "router")
+	var pi = BigDecimal(0.0, mathCtx)
 	var donePieces = 0.0
 
 	val totalPieces = value / step
@@ -29,7 +30,7 @@ class Listener(value: Double, step: Double) extends Actor with ActorLogging {
 
 	def receive = LoggingReceive {
 		case ResultPiece(subsum) => 
-			pi += subsum
+			pi = pi + subsum
 			donePieces += 1.0
 			log.info(s"\tReceived $donePieces")
 			if (donePieces >= totalPieces) {
@@ -50,10 +51,10 @@ class Listener(value: Double, step: Double) extends Actor with ActorLogging {
 
 object Worker {
 	case class TaskPiece(start: Double, end: Double)
-	case class ResultPiece(subsum: Double)
+	case class ResultPiece(subsum: BigDecimal)
 }
 
-class Worker extends Actor with ActorLogging {
+class Worker(mathCtx: java.math.MathContext) extends Actor with ActorLogging {
 	import Worker._
 
 	def receive = LoggingReceive {
@@ -62,11 +63,11 @@ class Worker extends Actor with ActorLogging {
 		
 	}
 
-	def calPiece(begin: Double, end: Double): Double = {
+	private def calPiece(begin: Double, end: Double): BigDecimal = {
 		var i = begin
-		var pi = 0.0; 
+		var pi = BigDecimal(0.0, mathCtx); 
 		while (i <= end) { 
-			pi += Math.pow(-1, i+1)/(2*i-1)
+			pi = pi + Math.pow(-1, i+1)/(2*i-1)
 			i += 1.0 
 		}
 		pi
@@ -84,10 +85,12 @@ object PiCalculatorApp extends App {
 		}
 	""")
 	val system = ActorSystem("PICalculatorApp", config)
+	
+	val mathCtx = new java.math.MathContext(100)
 
 	val step = 1.0E7
-	val value = step * 1.0E3
-	val listener = system.actorOf(Props(classOf[Listener], value, step), name = "listener")
+	val value = step * 1.0E2
+	val listener = system.actorOf(Props(classOf[Listener], value, step, mathCtx), name = "listener")
 	listener ! Start
 
 }
